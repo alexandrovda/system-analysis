@@ -1,0 +1,158 @@
+# Выбор баз данных для микросервисов MCF
+
+## Итоговая таблица
+
+| # | Микросервис | Тип БД | Конкретная БД | Ключевые критерии |
+|---|-------------|--------|---------------|-------------------|
+| 1 | **Testing Service** | Key-Value | Redis / DynamoDB | Scalability 4 + Availability 4 для DDoS |
+| 2 | **Matching Service** | RDBMS | PostgreSQL | Consistency 5 для детерминированного подбора |
+| 3 | **Billing Service** | RDBMS | PostgreSQL | Consistency 5 для CatFinComplience |
+| 4 | **Payroll Service** | RDBMS | PostgreSQL | Consistency 5 для финансовых правил |
+| 5 | **OrderProcessing Service** | Column Family | Cassandra / HBase | Availability 4 + Scalability 4 для 10 заказов/минуту |
+| 6 | **IncentiveService** | RDBMS | PostgreSQL | Simplicity + consistency бонусом |
+| 7 | **ClientAcquisition Service** | Document | MongoDB | Гибкая модель для разных форматов аккаунтов из НСВ |
+
+---
+
+## Детальные обоснования
+
+### 1. Testing Service — Key-Value (Redis / DynamoDB)
+
+**Ключевые характеристики:**
+- Scalability высокая (DDoS, 1к заявок/день)
+- Availability высокая (атаки могут положить систему)
+- Read/Write: много записей (заявки), чтения для матчинга → **1R/3W**
+
+**Почему Key-Value:**
+- ⭐⭐⭐⭐ Scalability/Throughput — максимальная производительность при DDoS
+- ⭐⭐⭐⭐ Availability/Partition tolerance — устойчивость к сбоям
+- ⭐⭐⭐ Read/Write priority (1R/3W) — оптимизирована для записи
+
+**Как используется:**
+- Хранение заявок от кандидатов
+- Кэширование результатов тестов
+
+---
+
+### 2. Matching Service — RDBMS (PostgreSQL)
+
+**Ключевые характеристики:**
+- Consistency высокая (детерминированный результат подбора)
+- Data modeling гибкая (шаги алгоритма, рейтинги)
+- Read/Write: много чтений (характеристики воркеров) → **3R/1W**
+
+**Почему RDBMS:**
+- ⭐⭐⭐⭐⭐ Consistency — критична для детерминированного подбора
+- ⭐⭐⭐ Ease of data modeling — гибкая схема для шагов алгоритма
+- ⭐⭐⭐ Read/Write priority (2R/2W) — приемлемый компромисс
+
+**Как используется:**
+- Хранение шагов алгоритма матчинга
+- Рейтинги воркеров
+- Результаты подбора
+
+**Примечание:** Шаги алгоритма можно хранить как JSON в PostgreSQL — получаем гибкость Document + consistency RDBMS.
+
+---
+
+### 3. Billing Service — RDBMS (PostgreSQL)
+
+**Ключевые характеристики:**
+- Consistency высокая (нельзя терять платежи, CatFinComplience)
+- Data modeling важна (инвойсы, скидки, статусы)
+- Read/Write: сбалансированное → **2R/2W**
+
+**Почему RDBMS:**
+- ⭐⭐⭐⭐⭐ Consistency — критична для финансовых операций
+- ⭐⭐ Ease of data modeling — реляционная модель для инвойсов
+- ⭐⭐⭐⭐ Read/Write priority (2R/2W) — идеально для баланса
+
+**Как используется:**
+- Инвойсы клиентов
+- История платежей
+- Система скидок (US-040)
+- Аудит-логи для CatFinComplience
+
+---
+
+### 4. Payroll Service — RDBMS (PostgreSQL)
+
+**Ключевые характеристики:**
+- Consistency высокая (точные финансовые правила: 60%, штрафы 40)
+- Data modeling важна (выплаты, штрафы, инвойсы)
+- Read/Write: сбалансированное → **2R/2W**
+
+**Почему RDBMS:**
+- ⭐⭐⭐⭐⭐ Consistency — критична для выплат воркерам
+- ⭐⭐⭐ Ease of data modeling — реляционная модель для выплат
+- ⭐⭐⭐⭐ Read/Write priority (2R/2W) — идеально для баланса
+
+**Как используется:**
+- Инвойсы воркеров
+- История выплат
+- Штрафы за провалы
+- Ручные начисления менеджеров (US-270)
+- Аудит-логи для CatFinComplience
+
+---
+
+### 5. OrderProcessing Service — Column Family (Cassandra / HBase)
+
+**Ключевые характеристики:**
+- Availability высокая (10 заказов/минуту, ~14,400/день)
+- Data modeling гибкая (заказы, клиенты, статусы)
+- Read/Write: много чтений (дашборды) → **3R/1W**
+
+**Почему Column Family:**
+- ⭐⭐⭐⭐ Availability/Partition tolerance — устойчивость к сбоям
+- ⭐⭐⭐⭐ Scalability/Throughput — высокая производительность
+- ⭐⭐⭐⭐ Read/Write priority (3R/1W) — оптимизирована для чтения
+
+**Компромисс:**
+- ⭐ Ease of data modeling (1) — сложная модель, но приемлемо для заказов
+
+**Как используется:**
+- Заказы и их статусы
+- История заказов
+- Дашборды для клиентов и воркеров
+
+---
+
+### 6. IncentiveService — RDBMS (PostgreSQL)
+
+**Ключевые характеристики:**
+- Simplicity высокая (15 менеджеров)
+- Read/Write: сбалансированное → **2R/2W**
+
+**Почему RDBMS:**
+- ⭐⭐⭐⭐⭐ Consistency — бонусом (не критична, но полезна)
+- ⭐⭐ Ease of data modeling — простая реляционная модель
+- ⭐⭐⭐⭐ Read/Write priority (2R/2W) — идеально для баланса
+
+**Как используется:**
+- Ставки менеджеров
+- Результаты заказов
+- Выигрыши/проигрыши
+- Банк ставок
+
+---
+
+### 7. ClientAcquisition Service — Document (MongoDB)
+
+**Ключевые характеристики:**
+- Simplicity высокая (Generic поддомен)
+- Securability высокая (персональные данные клиентов)
+- Read/Write: много записей (получение аккаунтов из НСВ) → **1R/3W**
+
+**Почему Document:**
+- ⭐⭐⭐ Ease of data modeling — гибкая модель для разных форматов аккаунтов из НСВ
+- ⭐⭐⭐ Availability — устойчивость к сбоям при интеграции с внешней системой
+- ⭐⭐⭐ Scalability — возможность масштабирования при росте количества аккаунтов
+
+**Как используется:**
+- Хранение аккаунтов клиентов из НСВ
+- Персональные данные клиентов (имя, возраст, порода)
+- История получения аккаунтов
+- Статусы аккаунтов (активен/заблокирован)
+
+
